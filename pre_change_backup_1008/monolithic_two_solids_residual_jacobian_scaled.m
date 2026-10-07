@@ -190,20 +190,12 @@ if isfield(parL, 'useActiveTranslocation') && parL.useActiveTranslocation
         u_z_old = u_z;
     end
     zL_deformed_old = z_nodes + u_z_old;
-    if f0>=0
     z_head_frozen    = max(zL_deformed_old);
-    else 
-        z_head_frozen    = min(zL_deformed_old);
-    end
     
     ramp_length = 0.1e-6;                             % [m] Transition length scale (100 nm)
-    if f0>=0
-    pore_depth  = -(z_bot - z_head_frozen);             % Positive once head penetrates past z_bot
-    else
-        pore_depth  = z_bot - z_head_frozen;             % Positive once head penetrates past z_bot
-    end
+    pore_depth  = z_bot - z_head_frozen;             % Positive once head penetrates past z_bot
     act_factor  = 0.5 * (1 + tanh(pore_depth / ramp_length));
-
+    
     for e = 1:size(meshL.conn, 1)
         elem_nodes = meshL.conn(e, :);
         n_elem     = numel(elem_nodes);
@@ -248,10 +240,8 @@ if isfield(parL, 'useActiveTranslocation') && parL.useActiveTranslocation
             end
         end
     end
-
 end
 
-        
 % Subtract active force from leukocyte residual
 RLfull = FintL - FextL - f_active_global;
 RL     = RLfull(freeL);
