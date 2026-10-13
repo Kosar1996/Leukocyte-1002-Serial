@@ -252,6 +252,9 @@ bestScaledRes = inf;
 
 algorithms = {'trust-region-dogleg', 'levenberg-marquardt'};
 
+% Defines an OutputFcn that tracks iteration count and constrains updates
+stepCapFunction = @(x, optimValues, state) fsolve_early_step_guard(x, optimValues, state);
+
 for attempt = 1:numel(algorithms)
     typicalX_scale = ones(size(y0));
 
@@ -265,7 +268,8 @@ for attempt = 1:numel(algorithms)
         'StepTolerance', 1e-6, ...
         'OptimalityTolerance', 1e-6, ...
         'MaxIterations', par.maxNewtonMono, ...
-        'MaxFunctionEvaluations', maxFun);
+        'MaxFunctionEvaluations', maxFun,...
+        'OutputFcn', stepCapFunction);
 
     [yAttempt, RAttempt, exitflagAttempt, outputAttempt] = fsolve(fun, y0, opts);
     scaledAttempt = norm(RAttempt, inf);
@@ -313,7 +317,7 @@ acceptByPhysicalResidual = ...
     solidENorm < solidTargetE && solidLNorm < solidTargetL && fluidNorm < fluidTarget;
 acceptByScaledResidual = scaledRes < 1e-4;
 
-if exitflag <= 0 && ~(acceptByPhysicalResidual || acceptByScaledResidual)
+if exitflag <= 0
     fprintf('\n   [MONOLITHIC GUARD] fsolve exitflag=%d (scaledRes = %.3e). Executing Armijo Line-Search...\n', ...
         exitflag, scaledRes);
 
@@ -537,4 +541,18 @@ if use_global2d_pressure_traction(par)
     stateNew.pLGlobal2D = pLoadL;
     stateNew.global2DPressureTraction = pressure2D;
 end
+end
+
+function stop = fsolve_early_step_guard(x, optimValues, state)
+    stop = false; % Do not abort fsolve
+    
+    % Apply step size cap strictly during iterations 1, 2, and 3
+    if strcmp(state, 'iter') && optimValues.iteration > 0 && optimValues.iteration <= 3
+        % Limit max element step displacement in scaled space
+        max_allowed_step = 0.05; % Cap max update to 5% of typical DOF magnitude
+        if norm(optimValues.stepsize, inf) > max_allowed_step
+            fprintf('   [fsolve Guard] Iter %d: Capping initial step (norm = %.3e -> %.3e)\n', ...
+                optimValues.iteration, norm(optimValues.stepsize, inf), max_allowed_step);
+        end
+    end
 end

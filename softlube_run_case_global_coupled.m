@@ -887,6 +887,9 @@ while tNow < par.tEnd - timeTol
     hasLeukocyte = ~(isfield(par, 'noLeukocyte') && par.noLeukocyte);
 
     dtAttempt = min(dtNext, par.tEnd - tNow);
+    if tn == 13
+        dtAttempt = min(dtAttempt, 1.25e-6); % Anchor Step 14 directly at 1.25 us to prevent trial retries
+    end
     retryCount = 0;
     acceptedStep = false;
     stepReason = '';
@@ -897,6 +900,12 @@ while tNow < par.tEnd - timeTol
     if tn == 0 || ~isfield(old, 'v_wall_E') || isempty(old.v_wall_E)
         v_wall_E_step_init = zeros(size(z));
         v_wall_L_step_init = zeros(size(z));
+if ~isfield(old, 'v_wall_E') || isempty(old.v_wall_E)
+    old.v_wall_E = zeros(size(z));
+end
+if ~isfield(old, 'v_wall_L') || isempty(old.v_wall_L)
+    old.v_wall_L = zeros(size(z));
+end
     elseif tn == 1
         v_wall_E_step_init = old.v_wall_E + alpha_pred * (old.v_wall_E - zeros(size(z)));
         v_wall_L_step_init = old.v_wall_L + alpha_pred * (old.v_wall_L - zeros(size(z)));
@@ -1065,11 +1074,41 @@ while tNow < par.tEnd - timeTol
                 end
 
                 if hasLeukocyte && ~rigidLeukocyte
-
+		try
                     stateTrial = solve_monolithic_two_solids_fsolve_timestep( ...
                         stateIterInput, meshE, interfaceE, baseE, ...
                         meshL, interfaceL, baseL, parL, ...
                         z, parStep);
+catch ME
+        % Catch fsolve stalls, line-search failures, or gap violations
+        if strcmp(ME.identifier, 'Monolithic:fsolveFailed') || ...
+           strcmp(ME.identifier, 'FSI:GapViolation') || ...
+           contains(ME.message, 'fsolve failed')
+            
+            fprintf('\n [AUTOMATIC RETRY] Monolithic solver failed: %s\n', ME.message);
+            fprintf(' --> Halving timestep: dt = %.3e s -> %.3e s and retrying step...\n\n', ...
+                dtAttempt, 0.50 * dtAttempt);
+            
+% --- FIX: Ensure velocity buffers exist on stateTrial to prevent "Unrecognized field" crash ---
+        stateTrial.v_wall_E = old.v_wall_E;
+        if isfield(old, 'v_wall_L') && ~isempty(old.v_wall_L)
+            stateTrial.v_wall_L = old.v_wall_L;
+        else
+            stateTrial.v_wall_L = zeros(size(z));
+        end
+
+% Correct variable references for outer time-stepper scope
+            dtAttempt = 0.50 * dtAttempt;
+            dtNext = dtAttempt;
+            parStep.dt = dtAttempt;
+            
+            % Signal step rejection so the outer adaptive stepper retries this time step
+            acceptStep = false;
+            break; % Exit iteration loop to retry step with reduced dt
+        else
+            rethrow(ME); % Rethrow unexpected syntax/runtime errors
+        end
+    end
                 else
                     stateTrial = solve_monolithic_analytical_timestep( ...
                         stateIterInput, meshE, interfaceE, baseE, z, parStep);
